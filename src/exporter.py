@@ -232,18 +232,18 @@ def main():
         print("polling interval:\t\t"+str(POLLING_INTERVAL)+"s")
         print("inverter scrape IP:\t\t"+str(INVERTER_IP))
         print("total PV power: \t\t"+str(PV_POWER)+"W")
-        if SCRAPE_SPOT_PRICE:
-            print("spot price scrape: \t\tEnabled")
-            print("spot price scrape interval: \t"+str(SPOT_SCRAPE_INTERVAL)+" min")
-        else:
-            print("spot price scrape: \t\tDisabled")
-            print("fixed energy price: \t\t"+str(ENERGY_PRICE)+" eur/KW")
+        #if SCRAPE_SPOT_PRICE:
+        #    print("spot price scrape: \t\tEnabled")
+        #    print("spot price scrape interval: \t"+str(SPOT_SCRAPE_INTERVAL)+" min")
+        #else:
+        #    print("spot price scrape: \t\tDisabled")
+        #    print("fixed energy price: \t\t"+str(ENERGY_PRICE)+" eur/KW")
 
         inverter_metrics = InverterMetrics(
             POLLING_INTERVAL=int(POLLING_INTERVAL),
-            ENERGY_PRICE=ENERGY_PRICE,
+            ENERGY_PRICE=0.4,
             PV_POWER=PV_POWER,
-            SCRAPE_SPOT_PRICE=SCRAPE_SPOT_PRICE,
+            SCRAPE_SPOT_PRICE=False,
             SPOT_SCRAPE_INTERVAL=SPOT_SCRAPE_INTERVAL,
             LAST_SPOT_UPDATE=LAST_SPOT_UPDATE
         )
