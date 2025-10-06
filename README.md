@@ -130,7 +130,7 @@ check that you have:
 To build the image, just go to the root folder (where the Dockerfile is) and run:
 ```
 git clone git@github.com:gustonator/goodwe-prometheus-exporter.git
-docker build -t goodwe-exporter:1.4.5 .
+docker build -t goodwe-exporter:1.4.6 .
 ```
 
 ### Install/Run

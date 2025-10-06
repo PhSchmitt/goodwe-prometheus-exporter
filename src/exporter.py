@@ -14,20 +14,53 @@ import goodwe
 
 #logger = logging.getLogger(__name__)
 
-print("\nGOODWE DATA EXPORTER v1.4.5\n")
+print("\nGOODWE DATA EXPORTER v1.4.6\n")
 
-QUERY = '''<?xml version="1.0" encoding="UTF-8" ?>
+QUERY_ELECTRICITY = """<?xml version="1.0" encoding="UTF-8" ?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:pub="http://www.ote-cr.cz/schema/service/public">
     <soapenv:Header/>
-    <soapenv:Body>                                                                          
-        <pub:GetDamPriceE>
+    <soapenv:Body>
+        <pub:GetDamPricePeriodE>
             <pub:StartDate>{start}</pub:StartDate>
             <pub:EndDate>{end}</pub:EndDate>
-            <pub:InEur>{in_eur}</pub:InEur>
-        </pub:GetDamPriceE>
+            <pub:PeriodResolution>PT15M</pub:PeriodResolution>
+        </pub:GetDamPricePeriodE>
     </soapenv:Body>
 </soapenv:Envelope>
-'''
+"""
+
+# Response example
+
+# <?xml version="1.0" ?>
+# <SOAP-ENV:Envelope SOAP-ENV:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/">
+#   <SOAP-ENV:Body>
+#     <GetDamPricePeriodEResponse xmlns="http://www.ote-cr.cz/schema/service/public">
+#       <Result>
+#         <Item>
+#           <Date>2025-10-01</Date>
+#           <PeriodResolution>PT15M</PeriodResolution>
+#           <PeriodIndex>1</PeriodIndex>
+#           <PeriodInterval>00:00-00:15</PeriodInterval>
+#           <Price>97.21</Price>
+#           <HourlyPrice>85.56</HourlyPrice>
+#           <VolumeTotal>868.850</VolumeTotal>
+#         </Item>
+#         <Item>
+#           <Date>2025-10-01</Date>
+#           <PeriodResolution>PT15M</PeriodResolution>
+#           <PeriodIndex>2</PeriodIndex>
+#           <PeriodInterval>00:15-00:30</PeriodInterval>
+#           <Price>88.10</Price>
+#           <HourlyPrice>85.56</HourlyPrice>
+#           <VolumeTotal>852.475</VolumeTotal>
+#         </Item>
+#        ...
+#       </Result>
+#     </GetDamPricePeriodEResponse>
+#   </SOAP-ENV:Body>
+# </SOAP-ENV:Envelope>
+
+
 class OTEFault(Exception):
     pass
 
@@ -93,26 +126,35 @@ def checkArgs(argv):
         sys.exit(2)
 
 class InverterMetrics:
-    ELECTRICITY_PRICE_URL = 'https://www.ote-cr.cz/services/PublicDataService' #deleted "e"
+    ELECTRICITY_PRICE_URL = 'https://www.ote-cr.cz/services/PublicDataService'
 
     # build the query - fill the variables
-    def get_query(self, start: date, end: date, in_eur: bool) -> str:
-        return QUERY.format(start=start.isoformat(), end=end.isoformat(), in_eur='true' if in_eur else 'false')
+    def get_query(self, start: date, end: date) -> str:
+        return QUERY_ELECTRICITY.format(start=start.isoformat(), end=end.isoformat(), in_eur="true")
 
     # download data from web
     async def _download(self, query: str) -> str:
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get('https://www.ote-cr.cz') as response:
-                    async with session.post(self.ELECTRICITY_PRICE_URL, data=query) as response:
-                        return await response.text()
+                # async with session.get('https://www.ote-cr  .cz') as response:
+                async with session.post(self.ELECTRICITY_PRICE_URL, data=query) as response:
+                    return await response.text()
         except aiohttp.ClientConnectorError as e:
-            print(f"SSL error occurred: {e}")
-
+            raise OTEFault(f"Unable to download rates: {e}")
+        
+    def _fromstring(self, text: str):
+        try:
+            return ET.fromstring(text)
+        except Exception as e:
+            if 'Application is not available' in text:
+                raise OTEFault('OTE Portal is currently not available!') from e
+            raise OTEFault('Failed to parse query response.') from e
+        
+    # parse the downloaded data        
     def parse_spot_data(self, xmlResponse):
         root = ET.fromstring(xmlResponse)
         for item in root.findall('.//{http://www.ote-cr.cz/schema/service/public}Item'):
-            hour_el = item.find('{http://www.ote-cr.cz/schema/service/public}Hour')
+            hour_el = item.find('{http://www.ote-cr.cz/schema/service/public}PeriodIndex')
             price_el = item.find('{http://www.ote-cr.cz/schema/service/public}Price')
             current_hour = datetime.now().hour
 
@@ -120,6 +162,9 @@ class InverterMetrics:
                 price_el = Decimal(price_el.text)
                 price_el /= Decimal(1000) #convert MWh -> KWh
                 return price_el
+
+        # Fallback if nothing found
+        return none
         
     def __init__(self, POLLING_INTERVAL,ENERGY_PRICE,PV_POWER,SCRAPE_SPOT_PRICE,SPOT_SCRAPE_INTERVAL,LAST_SPOT_UPDATE):
         self.POLLING_INTERVAL = POLLING_INTERVAL
@@ -176,7 +221,7 @@ class InverterMetrics:
             now = datetime.now()
             # if the last spot price update was more that 30min ago, scrape it again
             if now - self.LAST_SPOT_UPDATE > self.SPOT_SCRAPE_INTERVAL:
-                query = self.get_query(date.today(), date.today(), in_eur=True)
+                query = self.get_query(date.today(), date.today())
                 xmlResponse = asyncio.run(self._download(query))
 
                 # exception, if the OTE website or spot prices are unavailable
@@ -201,7 +246,7 @@ class InverterMetrics:
                     continue
                 if sensor.id_ in runtime_data and type(runtime_data[sensor.id_]) == int or type(runtime_data[sensor.id_]) == float:
                     previous_sensor_ids.append(sensor.id_)
-                    self.g[countID].set(str(runtime_data[sensor.id_]))
+                    self.g[countID].set(float(runtime_data[sensor.id_]))
                     countID+=1
 
             # set value for additional energy-price
@@ -249,7 +294,7 @@ def main():
         )
 
         # Start the server to expose metrics.
-        prometheus.start_http_server(int(EXPORTER_PORT))
+        prometheus.start_http_server(int(EXPORTER_PORT)) 
         print("exporter started on port:\t"+str(EXPORTER_PORT)+"\n")
 
         inverter_metrics.run_metrics_loop()
